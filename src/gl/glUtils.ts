@@ -120,6 +120,41 @@ export function makeSeedData(width: number, height: number, density = 0.02): Flo
   return data;
 }
 
+export interface Rgba8Fbo {
+  framebuffer: WebGLFramebuffer;
+  texture: WebGLTexture;
+  width: number;
+  height: number;
+}
+
+export function createRgba8Fbo(
+  gl: WebGL2RenderingContext,
+  width: number,
+  height: number,
+): Rgba8Fbo {
+  const texture = gl.createTexture();
+  if (!texture) throw new Error('Failed to create texture');
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+  const framebuffer = gl.createFramebuffer();
+  if (!framebuffer) throw new Error('Failed to create framebuffer');
+  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    throw new Error(`Framebuffer incomplete: 0x${status.toString(16)}`);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+
+  return { framebuffer, texture, width, height };
+}
+
 export function createQuad(gl: WebGL2RenderingContext): WebGLVertexArrayObject {
   const vao = gl.createVertexArray();
   if (!vao) throw new Error('Failed to create VAO');

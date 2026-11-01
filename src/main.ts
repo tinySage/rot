@@ -1,7 +1,9 @@
 import './style.css';
 import 'katex/dist/katex.min.css';
-import { GrayScottSim } from './gl/GrayScottSim';
+import { GrayScottSim, DEFAULT_PARAMS } from './gl/GrayScottSim';
 import { PhaseMap } from './gl/PhaseMap';
+import { Guidance } from './gl/Guidance';
+import { Fig4Renderer } from './gl/Fig4Renderer';
 import { generateSpecimen } from './specimen';
 import { paramStore, F_RANGE, K_RANGE } from './state';
 import { enhanceScrubNumbers } from './ui/scrubNumber';
@@ -14,6 +16,7 @@ const PHASE_COLS = 8;
 const PHASE_ROWS = 8;
 const PHASE_TILE_RES = 48;
 const PHASE_STEPS_PER_TILE = 3;
+const FIG4_STATE_UPDATE_EVERY = 3;
 
 const MODEL_EQUATION = String.raw`\begin{aligned}
 \frac{\partial u}{\partial t} &= D_u \nabla^2 u \;-\; u v^2 \;+\; \htmlClass{eqsym-F}{F}\,(1-u) \\[0.3em]
@@ -56,10 +59,11 @@ app.innerHTML = `
       <figcaption>
         <span class="fig-label">Fig. 1</span>
         <span>
-          A Gray&ndash;Scott reaction&ndash;diffusion system runs on the GPU and is composited
-          over the image below as a flat dark overlay. Upload a photograph, or leave the
-          procedurally generated specimen in place. The parameters below are the same
-          <em>F</em> and <em>k</em> discussed in &sect;1.
+          A Gray&ndash;Scott reaction&ndash;diffusion system runs on the GPU and is lit and
+          composited over the image below (see &sect;3). Upload a photograph &mdash; faces
+          slow it down, edges speed it up, see &sect;2 &mdash; or leave the procedurally
+          generated specimen in place. The parameters below are the same <em>F</em> and
+          <em>k</em> discussed in &sect;1.
         </span>
       </figcaption>
     </figure>
@@ -75,8 +79,9 @@ app.innerHTML = `
           simulation, not a rendering of one. &sect;1 states the model and its two governing
           parameters, feed rate <span class="scrub" data-scrub="F">0.037</span> and kill rate
           <span class="scrub" data-scrub="k">0.0600</span>, both of which are draggable
-          wherever they appear in the text. &sect;2 and &sect;3 describe how image structure
-          will guide, and currently does not yet guide, the diffusion; &sect;4 covers the
+          wherever they appear in the text. &sect;2 derives a guidance field from the uploaded
+          photograph itself &mdash; edges and faces &mdash; so growth follows the image's own
+          structure; &sect;3 covers how that state is lit and rendered; &sect;4 covers the
           WebGL2 implementation.
         </p>
       </section>
@@ -143,28 +148,52 @@ app.innerHTML = `
       <section id="sec-structure">
         <h2>2&ensp;Guidance from image structure</h2>
         <p>
-          The simulation above treats the photograph purely as a backdrop: <em>F</em>,
-          <em>k</em>, <span class="eq-var">D<sub>u</sub></span> and
-          <span class="eq-var">D<sub>v</sub></span> are uniform across the frame, so the mould
-          spreads with no regard for what it is growing on. The next phase makes the image
-          itself part of the reaction &mdash; local luminance and edge structure will modulate
-          the diffusion tensor directly, so the organism grows faster across flat skies and
-          skin, and is slowed or channelled by edges, so that decay reads as following the
-          photograph's own contours rather than ignoring them.
+          On upload, the photograph is read twice before the solver ever touches it. A Sobel
+          filter over luminance gives an edge-strength map; <code>@mediapipe/tasks-vision</code>'s
+          <code>FaceDetector</code> gives face bounding boxes, which are painted as soft,
+          feathered ellipses into a mask. Both are blurred and packed into one guidance
+          texture &mdash; edge strength in R, face mask in G &mdash; computed once per upload,
+          not per frame.
         </p>
         <aside class="sidenote">
-          The guidance field is planned to come from a luminance gradient and a face-region
-          mask (via <code>@mediapipe/tasks-vision</code>), so skin is treated differently from
-          background. Neither is wired up yet; this section describes intent, not behaviour.
+          Face detection runs entirely client-side via a WebAssembly model fetched on first
+          use. If it fails to load (offline, or blocked), the face channel stays at zero and
+          growth is driven by edges alone &mdash; it degrades rather than breaking.
         </aside>
         <p>
-          Concretely, a per-pixel guidance texture computed once per uploaded image &mdash;
-          not per frame &mdash; is expected to scale <span class="eq-var">D<sub>u</sub></span>
-          and <span class="eq-var">D<sub>v</sub></span> locally, and possibly to perturb
-          <em>F</em> itself in high-contrast regions. None of that is implemented in this
-          phase: the composite you see is a flat overlay, described next.
+          Inside the solver this texture scales the feed rate <em>F</em> per texel: faces
+          multiply it down, so rot reaches skin last; edges multiply it up, so growth follows
+          the photograph's own contours instead of ignoring them. <span class="eq-var">D<sub>u</sub></span>
+          and <span class="eq-var">D<sub>v</sub></span> are still uniform &mdash; only the feed
+          term is content-aware in this phase.
         </p>
       </section>
+
+      <figure class="fig page" id="fig3">
+        <div class="guidance-grid">
+          <div class="guidance-panel">
+            <canvas id="edgeCanvas" width="480" height="216"></canvas>
+            <div class="guidance-panel-label">edge map</div>
+          </div>
+          <div class="guidance-panel">
+            <canvas id="faceCanvas" width="480" height="216"></canvas>
+            <div class="guidance-panel-label">face mask</div>
+          </div>
+          <div class="guidance-panel">
+            <canvas id="rateCanvas" width="480" height="216"></canvas>
+            <div class="guidance-panel-label">resulting rate field</div>
+          </div>
+        </div>
+        <figcaption>
+          <span class="fig-label">Fig. 3</span>
+          <span>
+            The guidance texture split into its two channels, and the feed-rate multiplier
+            they produce together: blue where growth is suppressed (faces), orange where it is
+            boosted (edges), grey where <em>F</em> is left alone. Computed from whatever image
+            is currently loaded in Figure&nbsp;1.
+          </span>
+        </figcaption>
+      </figure>
 
       <section id="sec-rendering">
         <h2>3&ensp;Rendering</h2>
@@ -179,10 +208,13 @@ app.innerHTML = `
           time step for visibly faster development.
         </p>
         <p>
-          Compositing is presently a single pass: the activator field
-          <span class="eq-var">v</span> is mapped onto a dark green, fading to black, and
-          mixed over the base photograph by its own magnitude. There is no sampling of the
-          image inside the reaction step yet &mdash; see &sect;2.
+          Compositing now treats <span class="eq-var">v</span> as a height field rather than a
+          flat mask. Central differences across the four neighbouring texels give a surface
+          normal; a fixed key light is shaded with Blinn-Phong &mdash; diffuse plus a tight,
+          high-exponent specular term standing in for a wet sheen on fresh growth. The albedo
+          itself runs along a palette from pale grey-green at low concentration (bloom) to
+          near-black as <span class="eq-var">v</span> saturates (necrosis), so colour and
+          relief both track the same field.
         </p>
         <aside class="sidenote">
           Figure&nbsp;2's 64 tiles are deliberately small (48&times;48 texels, three steps per
@@ -190,6 +222,24 @@ app.innerHTML = `
           given (F, k) sits, not to look crisp individually.
         </aside>
       </section>
+
+      <figure class="fig page" id="fig4">
+        <div class="fig4-wrap">
+          <canvas id="fig4Canvas"></canvas>
+        </div>
+        <div class="fig4-labels">
+          <span>flat</span>
+          <span>lit</span>
+        </div>
+        <figcaption>
+          <span class="fig-label">Fig. 4</span>
+          <span>
+            The same simulation state, Figure&nbsp;1's, rendered two ways: the Phase&nbsp;1
+            flat overlay on the left, the height-mapped Blinn-Phong composite described above
+            on the right. Figure&nbsp;1 itself now uses the lit version.
+          </span>
+        </figcaption>
+      </figure>
 
       <section id="sec-implementation">
         <h2>4&ensp;Implementation and performance</h2>
@@ -210,6 +260,15 @@ app.innerHTML = `
           (<code>RGBA16F</code>) are used throughout, which WebGL2 filters linearly without
           an extension; only <code>EXT_color_buffer_float</code> is required to render into
           them at all.
+        </p>
+        <p>
+          Figure&nbsp;4 poses the same context problem from the other direction: it needs
+          Figure&nbsp;1's exact simulation state, but textures can't cross a context boundary.
+          Re-running the reaction-diffusion step a second time would drift from Figure&nbsp;1
+          and waste the GPU redoing real work, so instead only the cheap part is duplicated
+          &mdash; Figure&nbsp;1's (<span class="eq-var">u</span>, <span class="eq-var">v</span>)
+          state is read back and re-uploaded into Figure&nbsp;4's own context every third
+          frame, where its two composite shaders run fresh.
         </p>
       </section>
 
@@ -247,7 +306,10 @@ if (!gl) {
 }
 
 const sim = new GrayScottSim(gl, SIM_WIDTH, SIM_HEIGHT);
-sim.setBaseImage(generateSpecimen(SIM_WIDTH, SIM_HEIGHT));
+const guidance = new Guidance(gl, SIM_WIDTH, SIM_HEIGHT);
+
+const specimenCanvas = generateSpecimen(SIM_WIDTH, SIM_HEIGHT);
+sim.setBaseImage(specimenCanvas);
 
 let stepsPerFrame = 12;
 let paused = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -317,9 +379,88 @@ function loadImageFile(file: File): void {
     sim.setBaseImage(img);
     sim.reset();
     canvasWrap.classList.add('has-image');
+    fig4.setBaseImage(img);
+    void updateGuidance(img, img.naturalWidth, img.naturalHeight);
     URL.revokeObjectURL(url);
   };
   img.src = url;
+}
+
+// --- Figure 3: edge map | face mask | resulting rate field -----------------
+
+const edgeCanvas = document.querySelector<HTMLCanvasElement>('#edgeCanvas')!;
+const faceCanvas = document.querySelector<HTMLCanvasElement>('#faceCanvas')!;
+const rateCanvas = document.querySelector<HTMLCanvasElement>('#rateCanvas')!;
+const edgeCtx = edgeCanvas.getContext('2d')!;
+const faceCtx = faceCanvas.getContext('2d')!;
+const rateCtx = rateCanvas.getContext('2d')!;
+
+const RATE_LOW = [0.33, 0.49, 0.76]; // suppressed growth (faces) -> cool blue
+const RATE_MID = [0.78, 0.76, 0.69]; // neutral, F unchanged -> paper grey
+const RATE_HIGH = [0.69, 0.33, 0.14]; // boosted growth (edges) -> rust
+
+function renderGuidancePanels(): void {
+  const data = guidance.pixelData;
+  const w = SIM_WIDTH;
+  const h = SIM_HEIGHT;
+
+  const edgeImg = edgeCtx.createImageData(w, h);
+  const faceImg = faceCtx.createImageData(w, h);
+  const rateImg = rateCtx.createImageData(w, h);
+
+  const { edgeBoost, faceReduction } = DEFAULT_PARAMS;
+  const minMul = 1 - faceReduction;
+  const maxMul = 1 + edgeBoost;
+
+  for (let i = 0; i < w * h; i++) {
+    const src = i * 4;
+    const edge = data[src] / 255;
+    const face = data[src + 1] / 255;
+
+    const e = Math.round(edge * 255);
+    edgeImg.data[src] = e;
+    edgeImg.data[src + 1] = e;
+    edgeImg.data[src + 2] = e;
+    edgeImg.data[src + 3] = 255;
+
+    faceImg.data[src] = Math.round(255 * face);
+    faceImg.data[src + 1] = Math.round(140 * face);
+    faceImg.data[src + 2] = Math.round(60 * face);
+    faceImg.data[src + 3] = 255;
+
+    const multiplier = (1 + edgeBoost * edge) * (1 - faceReduction * face);
+    let rgb: number[];
+    if (multiplier < 1) {
+      const t = (multiplier - minMul) / (1 - minMul);
+      rgb = lerpColor(RATE_LOW, RATE_MID, t);
+    } else {
+      const t = (multiplier - 1) / (maxMul - 1);
+      rgb = lerpColor(RATE_MID, RATE_HIGH, t);
+    }
+    rateImg.data[src] = Math.round(rgb[0] * 255);
+    rateImg.data[src + 1] = Math.round(rgb[1] * 255);
+    rateImg.data[src + 2] = Math.round(rgb[2] * 255);
+    rateImg.data[src + 3] = 255;
+  }
+
+  edgeCtx.putImageData(edgeImg, 0, 0);
+  faceCtx.putImageData(faceImg, 0, 0);
+  rateCtx.putImageData(rateImg, 0, 0);
+}
+
+function lerpColor(a: number[], b: number[], t: number): number[] {
+  const u = Math.min(1, Math.max(0, t));
+  return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
+}
+
+async function updateGuidance(
+  source: HTMLImageElement | HTMLCanvasElement,
+  sourceWidth: number,
+  sourceHeight: number,
+): Promise<void> {
+  await guidance.update(source, sourceWidth, sourceHeight);
+  sim.setGuidanceTexture(guidance.texture);
+  renderGuidancePanels();
 }
 
 function resizeCanvas(): void {
@@ -342,6 +483,43 @@ function frame(): void {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+void updateGuidance(specimenCanvas, SIM_WIDTH, SIM_HEIGHT);
+
+// --- Figure 4: flat vs lit, same sim state ----------------------------------
+
+const fig4Canvas = document.querySelector<HTMLCanvasElement>('#fig4Canvas')!;
+const fig4Wrap = document.querySelector<HTMLDivElement>('.fig4-wrap')!;
+const fig4Gl = fig4Canvas.getContext('webgl2', { antialias: false, alpha: false });
+if (!fig4Gl) {
+  throw new Error('WebGL2 is not available in this browser.');
+}
+const fig4 = new Fig4Renderer(fig4Gl, SIM_WIDTH, SIM_HEIGHT);
+fig4.setBaseImage(specimenCanvas);
+
+function resizeFig4Canvas(): void {
+  const rect = fig4Wrap.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.min(Math.round(rect.width * dpr), MAX_CANVAS_WIDTH);
+  const height = Math.round(rect.height * dpr);
+  if (fig4Canvas.width !== width || fig4Canvas.height !== height) {
+    fig4Canvas.width = width;
+    fig4Canvas.height = height;
+  }
+}
+new ResizeObserver(resizeFig4Canvas).observe(fig4Wrap);
+resizeFig4Canvas();
+
+let fig4FrameCount = 0;
+function fig4Frame(): void {
+  fig4FrameCount++;
+  if (!paused && fig4FrameCount % FIG4_STATE_UPDATE_EVERY === 0) {
+    fig4.updateState(sim.readStateData());
+  }
+  fig4.render(fig4Canvas.width, fig4Canvas.height);
+  requestAnimationFrame(fig4Frame);
+}
+requestAnimationFrame(fig4Frame);
 
 // --- Figure 2: the (F, k) phase map -----------------------------------------
 
