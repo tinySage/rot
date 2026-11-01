@@ -24,6 +24,9 @@ export const DEFAULT_PARAMS: GrayScottParams = {
   faceReduction: 0.75,
 };
 
+const BIOMASS_SAMPLE_WIDTH = 40;
+const BIOMASS_SAMPLE_HEIGHT = 18;
+
 export class GrayScottSim {
   readonly gl: WebGL2RenderingContext;
   readonly simWidth: number;
@@ -34,6 +37,8 @@ export class GrayScottSim {
   private fboB: FloatFbo;
   private readFbo: FloatFbo;
   private writeFbo: FloatFbo;
+  private biomassFbo: FloatFbo;
+  private biomassBuffer: Float32Array;
 
   private baseTexture: WebGLTexture;
   private guidanceTexture: WebGLTexture;
@@ -59,6 +64,9 @@ export class GrayScottSim {
     this.fboB = createFloatFbo(gl, simWidth, simHeight);
     this.readFbo = this.fboA;
     this.writeFbo = this.fboB;
+
+    this.biomassFbo = createFloatFbo(gl, BIOMASS_SAMPLE_WIDTH, BIOMASS_SAMPLE_HEIGHT);
+    this.biomassBuffer = new Float32Array(BIOMASS_SAMPLE_WIDTH * BIOMASS_SAMPLE_HEIGHT * 4);
 
     this.quad = createQuad(gl);
     this.stepProgram = createProgram(gl, quadVert, stepFrag);
@@ -211,6 +219,46 @@ export class GrayScottSim {
     gl.readPixels(0, 0, this.simWidth, this.simHeight, gl.RGBA, gl.FLOAT, buffer);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     return buffer;
+  }
+
+  /**
+   * Estimates total biomass (sum of V) for Figure 5. A GPU blit downsamples
+   * the full-resolution state into a tiny buffer first, so the periodic
+   * readPixels this needs stays cheap even sampled every few frames.
+   */
+  readBiomass(): number {
+    const { gl } = this;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.readFbo.framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.biomassFbo.framebuffer);
+    gl.blitFramebuffer(
+      0,
+      0,
+      this.simWidth,
+      this.simHeight,
+      0,
+      0,
+      this.biomassFbo.width,
+      this.biomassFbo.height,
+      gl.COLOR_BUFFER_BIT,
+      gl.LINEAR,
+    );
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.biomassFbo.framebuffer);
+    gl.readPixels(
+      0,
+      0,
+      this.biomassFbo.width,
+      this.biomassFbo.height,
+      gl.RGBA,
+      gl.FLOAT,
+      this.biomassBuffer,
+    );
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    const n = this.biomassFbo.width * this.biomassFbo.height;
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += this.biomassBuffer[i * 4 + 1];
+    const avgV = sum / n;
+    return avgV * this.simWidth * this.simHeight;
   }
 }
 

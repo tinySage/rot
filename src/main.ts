@@ -8,6 +8,7 @@ import { generateSpecimen } from './specimen';
 import { paramStore, F_RANGE, K_RANGE } from './state';
 import { enhanceScrubNumbers } from './ui/scrubNumber';
 import { renderEquation, wireEquationHover } from './ui/equations';
+import { BiomassChart, type BiomassSample } from './ui/BiomassChart';
 
 const SIM_WIDTH = 480;
 const SIM_HEIGHT = 216;
@@ -17,6 +18,8 @@ const PHASE_ROWS = 8;
 const PHASE_TILE_RES = 48;
 const PHASE_STEPS_PER_TILE = 3;
 const FIG4_STATE_UPDATE_EVERY = 3;
+const BIOMASS_SAMPLE_EVERY_FRAMES = 10;
+const BIOMASS_MAX_SAMPLES = 300;
 
 const MODEL_EQUATION = String.raw`\begin{aligned}
 \frac{\partial u}{\partial t} &= D_u \nabla^2 u \;-\; u v^2 \;+\; \htmlClass{eqsym-F}{F}\,(1-u) \\[0.3em]
@@ -63,7 +66,9 @@ app.innerHTML = `
           composited over the image below (see &sect;3). Upload a photograph &mdash; faces
           slow it down, edges speed it up, see &sect;2 &mdash; or leave the procedurally
           generated specimen in place. The parameters below are the same <em>F</em> and
-          <em>k</em> discussed in &sect;1.
+          <em>k</em> discussed in &sect;1. You can also
+          <a href="#" id="recordLink" class="caption-link">record a time-lapse (.webm)</a>
+          of this figure.
         </span>
       </figcaption>
     </figure>
@@ -252,6 +257,32 @@ app.innerHTML = `
           runtime.
         </p>
         <p>
+          Right now this page is running Figure&nbsp;1 at
+          <span class="readout" id="fpsReadout">&mdash;</span> fps, at a simulation
+          resolution of <span class="readout" id="resReadout">&mdash;</span>, with
+          <span class="readout" id="stepsReadout">&mdash;</span> reaction&ndash;diffusion
+          steps per animation frame. Figure&nbsp;5 tracks one more live number: total
+          biomass over time.
+        </p>
+      </section>
+
+      <figure class="fig page" id="fig5">
+        <div class="biomass-chart-wrap">
+          <canvas id="biomassCanvas"></canvas>
+        </div>
+        <figcaption>
+          <span class="fig-label">Fig. 5</span>
+          <span>
+            Total biomass (&sum;<span class="eq-var">v</span>) in Figure&nbsp;1 over time.
+            Sampled every few frames from a GPU-downsampled copy of the state texture, not
+            the full-resolution buffer, so the periodic <code>readPixels</code> this needs
+            stays cheap. Resets whenever the simulation does.
+          </span>
+        </figcaption>
+      </figure>
+
+      <section id="sec-implementation-detail">
+        <p>
           Figure&nbsp;1 and Figure&nbsp;2 run in separate WebGL2 contexts &mdash; one per
           <code>&lt;canvas&gt;</code>, as the API requires &mdash; but Figure&nbsp;2's 64
           tiles share a single context and a single pair of compiled programs between them,
@@ -324,6 +355,9 @@ const pauseBtn = document.querySelector<HTMLButtonElement>('#pauseBtn')!;
 const resetBtn = document.querySelector<HTMLButtonElement>('#resetBtn')!;
 const uploadBtn = document.querySelector<HTMLButtonElement>('#uploadBtn')!;
 const fileInput = document.querySelector<HTMLInputElement>('#fileInput')!;
+const fpsReadout = document.querySelector<HTMLSpanElement>('#fpsReadout')!;
+const resReadout = document.querySelector<HTMLSpanElement>('#resReadout')!;
+const stepsReadout = document.querySelector<HTMLSpanElement>('#stepsReadout')!;
 
 paramStore.subscribe(({ F, k }) => {
   sim.params.F = F;
@@ -334,23 +368,30 @@ paramStore.subscribe(({ F, k }) => {
   kReadout.textContent = k.toFixed(4);
 });
 
-speedRange.value = String(stepsPerFrame);
-speedReadout.textContent = String(stepsPerFrame);
+function setStepsPerFrame(n: number): void {
+  stepsPerFrame = Math.min(40, Math.max(1, n));
+  speedRange.value = String(stepsPerFrame);
+  speedReadout.textContent = String(stepsPerFrame);
+  stepsReadout.textContent = String(stepsPerFrame);
+}
+
+setStepsPerFrame(stepsPerFrame);
+resReadout.textContent = `${SIM_WIDTH}×${SIM_HEIGHT}`;
 pauseBtn.textContent = paused ? 'play' : 'pause';
 
 fRange.addEventListener('input', () => paramStore.setF(Number(fRange.value)));
 kRange.addEventListener('input', () => paramStore.setK(Number(kRange.value)));
-speedRange.addEventListener('input', () => {
-  stepsPerFrame = Number(speedRange.value);
-  speedReadout.textContent = String(stepsPerFrame);
-});
+speedRange.addEventListener('input', () => setStepsPerFrame(Number(speedRange.value)));
 
 pauseBtn.addEventListener('click', () => {
   paused = !paused;
   pauseBtn.textContent = paused ? 'play' : 'pause';
 });
 
-resetBtn.addEventListener('click', () => sim.reset());
+resetBtn.addEventListener('click', () => {
+  sim.reset();
+  resetBiomassHistory();
+});
 
 uploadBtn.addEventListener('click', () => fileInput.click());
 
@@ -378,12 +419,96 @@ function loadImageFile(file: File): void {
   img.onload = () => {
     sim.setBaseImage(img);
     sim.reset();
+    resetBiomassHistory();
     canvasWrap.classList.add('has-image');
     fig4.setBaseImage(img);
     void updateGuidance(img, img.naturalWidth, img.naturalHeight);
     URL.revokeObjectURL(url);
   };
   img.src = url;
+}
+
+// --- Figure 5: biomass over time --------------------------------------------
+
+const biomassCanvas = document.querySelector<HTMLCanvasElement>('#biomassCanvas')!;
+const biomassChart = new BiomassChart(biomassCanvas);
+let biomassHistory: BiomassSample[] = [];
+let biomassFrameCount = 0;
+let simStartTime = performance.now();
+
+function resetBiomassHistory(): void {
+  biomassHistory = [];
+  simStartTime = performance.now();
+  biomassChart.setSamples(biomassHistory);
+}
+
+function recordBiomassSample(): void {
+  const t = (performance.now() - simStartTime) / 1000;
+  const v = sim.readBiomass();
+  biomassHistory = [...biomassHistory, { t, v }];
+  if (biomassHistory.length > BIOMASS_MAX_SAMPLES) {
+    biomassHistory = biomassHistory.slice(biomassHistory.length - BIOMASS_MAX_SAMPLES);
+  }
+  biomassChart.setSamples(biomassHistory);
+}
+
+// --- Figure 1 caption: record a time-lapse ----------------------------------
+
+const recordLink = document.querySelector<HTMLAnchorElement>('#recordLink')!;
+let mediaRecorder: MediaRecorder | null = null;
+let recordedChunks: Blob[] = [];
+let recordStartTime = 0;
+let recordTimerId: number | undefined;
+
+recordLink.addEventListener('click', (event) => {
+  event.preventDefault();
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    return;
+  }
+  startRecording();
+});
+
+function startRecording(): void {
+  if (typeof canvas.captureStream !== 'function' || typeof MediaRecorder === 'undefined') {
+    recordLink.textContent = 'recording unsupported in this browser';
+    return;
+  }
+
+  const stream = canvas.captureStream(30);
+  recordedChunks = [];
+  const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+    ? 'video/webm;codecs=vp9'
+    : 'video/webm';
+  mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+  mediaRecorder.ondataavailable = (event) => {
+    if (event.data.size > 0) recordedChunks.push(event.data);
+  };
+
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `rot-timelapse-${Date.now()}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+    recordLink.textContent = 'record a time-lapse (.webm)';
+    recordLink.classList.remove('recording');
+    if (recordTimerId !== undefined) window.clearInterval(recordTimerId);
+  };
+
+  mediaRecorder.start();
+  recordStartTime = performance.now();
+  recordLink.classList.add('recording');
+  recordTimerId = window.setInterval(() => {
+    const elapsed = Math.floor((performance.now() - recordStartTime) / 1000);
+    recordLink.textContent = `stop recording (${elapsed}s)`;
+  }, 250);
 }
 
 // --- Figure 3: edge map | face mask | resulting rate field -----------------
@@ -477,9 +602,26 @@ function resizeCanvas(): void {
 new ResizeObserver(resizeCanvas).observe(canvasWrap);
 resizeCanvas();
 
+let fpsFrameCount = 0;
+let fpsLastTime = performance.now();
+
 function frame(): void {
-  if (!paused) sim.stepN(stepsPerFrame);
+  if (!paused) {
+    sim.stepN(stepsPerFrame);
+    biomassFrameCount++;
+    if (biomassFrameCount % BIOMASS_SAMPLE_EVERY_FRAMES === 0) recordBiomassSample();
+  }
   sim.renderToCanvas(canvas.width, canvas.height);
+
+  fpsFrameCount++;
+  const now = performance.now();
+  const elapsed = now - fpsLastTime;
+  if (elapsed >= 500) {
+    fpsReadout.textContent = ((fpsFrameCount * 1000) / elapsed).toFixed(0);
+    fpsFrameCount = 0;
+    fpsLastTime = now;
+  }
+
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -615,10 +757,8 @@ document.querySelectorAll<HTMLElement>('[data-scrub-speed]').forEach((el) => {
   el.addEventListener('pointermove', (event) => {
     if (!dragging) return;
     const delta = Math.round((event.clientX - startX) / 8);
-    stepsPerFrame = Math.min(40, Math.max(1, startValue + delta));
+    setStepsPerFrame(startValue + delta);
     el.textContent = String(stepsPerFrame);
-    speedRange.value = String(stepsPerFrame);
-    speedReadout.textContent = String(stepsPerFrame);
   });
   el.addEventListener('pointerup', (event) => {
     dragging = false;
