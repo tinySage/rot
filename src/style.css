@@ -202,6 +202,12 @@ button.upload-btn {
   position: static;
 }
 
+button#anisoToggle.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-family: 'IBM Plex Mono', monospace;
+}
+
 input[type='file'] {
   display: none;
 }
@@ -507,22 +513,25 @@ body.highlight-k .phase-guide-k {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Figure 4: flat vs lit                                                  */
+/* Figure 4 and Figure 6: side-by-side comparison panels                  */
 /* ---------------------------------------------------------------------- */
 
-.fig4-wrap {
+.fig4-wrap,
+.fig6-wrap {
   width: 100%;
   aspect-ratio: 40 / 9;
   background: #000;
 }
 
-.fig4-wrap canvas {
+.fig4-wrap canvas,
+.fig6-wrap canvas {
   display: block;
   width: 100%;
   height: 100%;
 }
 
-.fig4-labels {
+.fig4-labels,
+.fig6-labels {
   display: grid;
   grid-template-columns: 1fr 1fr;
   font-family: 'IBM Plex Mono', monospace;

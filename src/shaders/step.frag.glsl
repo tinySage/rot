@@ -17,12 +17,17 @@ uniform sampler2D uGuidance;
 uniform float uEdgeBoost;
 uniform float uFaceReduction;
 
+// R,G = e1 (structure-tensor eigenvector, points across the local edge),
+// B = coherence. See src/gl/TensorField.ts.
+uniform sampler2D uTensor;
+uniform float uAnisotropic;
+uniform float uAnisoStrength;
+
 // 9-point weighted Laplacian:
 //   0.05  0.2  0.05
 //   0.2   -1   0.2
 //   0.05  0.2  0.05
-void main() {
-  vec2 c  = texture(uState, vUv).rg;
+vec2 isotropicLaplacian(vec2 c) {
   vec2 n  = texture(uState, vUv + vec2(0.0, uTexel.y)).rg;
   vec2 s  = texture(uState, vUv + vec2(0.0, -uTexel.y)).rg;
   vec2 e  = texture(uState, vUv + vec2(uTexel.x, 0.0)).rg;
@@ -31,8 +36,36 @@ void main() {
   vec2 nw = texture(uState, vUv + vec2(-uTexel.x, uTexel.y)).rg;
   vec2 se = texture(uState, vUv + vec2(uTexel.x, -uTexel.y)).rg;
   vec2 sw = texture(uState, vUv + vec2(-uTexel.x, -uTexel.y)).rg;
+  return (n + s + e + w) * 0.2 + (ne + nw + se + sw) * 0.05 - c;
+}
 
-  vec2 lap = (n + s + e + w) * 0.2 + (ne + nw + se + sw) * 0.05 - c;
+// Directional finite-difference approximation of div(D(x) grad): sample two
+// steps along e1 (across the edge, slow) and two along e2 = perp(e1) (along
+// the edge, fast), and combine their second differences by D(x)'s
+// eigenvalues. 0.3 scales this to match isotropicLaplacian's magnitude, so
+// the two modes are comparable at coherence 0 — see Fig. 6.
+vec2 anisotropicLaplacian(vec2 c) {
+  vec3 t = texture(uTensor, vUv).rgb;
+  vec2 e1 = t.xy;
+  vec2 e2 = vec2(-e1.y, e1.x);
+  float coherence = t.z;
+
+  vec2 p1 = texture(uState, vUv + e1 * uTexel).rg;
+  vec2 m1 = texture(uState, vUv - e1 * uTexel).rg;
+  vec2 p2 = texture(uState, vUv + e2 * uTexel).rg;
+  vec2 m2 = texture(uState, vUv - e2 * uTexel).rg;
+
+  vec2 lapAcross = p1 + m1 - 2.0 * c;
+  vec2 lapAlong = p2 + m2 - 2.0 * c;
+
+  float dMin = 1.0 - uAnisoStrength * coherence;
+  float dMax = 1.0 + uAnisoStrength * coherence;
+  return 0.3 * (lapAcross * dMin + lapAlong * dMax);
+}
+
+void main() {
+  vec2 c = texture(uState, vUv).rg;
+  vec2 lap = uAnisotropic > 0.5 ? anisotropicLaplacian(c) : isotropicLaplacian(c);
 
   float u = c.r;
   float v = c.g;

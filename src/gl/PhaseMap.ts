@@ -63,6 +63,9 @@ export class PhaseMap {
       uGuidance: gl.getUniformLocation(this.stepProgram, 'uGuidance'),
       uEdgeBoost: gl.getUniformLocation(this.stepProgram, 'uEdgeBoost'),
       uFaceReduction: gl.getUniformLocation(this.stepProgram, 'uFaceReduction'),
+      uTensor: gl.getUniformLocation(this.stepProgram, 'uTensor'),
+      uAnisotropic: gl.getUniformLocation(this.stepProgram, 'uAnisotropic'),
+      uAnisoStrength: gl.getUniformLocation(this.stepProgram, 'uAnisoStrength'),
     };
     this.tileUniforms = {
       uState: gl.getUniformLocation(this.tileProgram, 'uState'),
@@ -117,9 +120,14 @@ export class PhaseMap {
     gl.uniform1f(this.stepUniforms.uDt, DT);
     gl.uniform1f(this.stepUniforms.uEdgeBoost, 0);
     gl.uniform1f(this.stepUniforms.uFaceReduction, 0);
+    gl.uniform1f(this.stepUniforms.uAnisotropic, 0);
+    gl.uniform1f(this.stepUniforms.uAnisoStrength, 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.neutralGuidance);
     gl.uniform1i(this.stepUniforms.uGuidance, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.neutralGuidance);
+    gl.uniform1i(this.stepUniforms.uTensor, 2);
 
     for (const tile of this.tiles) {
       gl.uniform1f(this.stepUniforms.uF, tile.F);
