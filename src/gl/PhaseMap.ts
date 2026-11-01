@@ -29,6 +29,7 @@ export class PhaseMap {
   private tileProgram: WebGLProgram;
   private stepUniforms: Record<string, WebGLUniformLocation | null>;
   private tileUniforms: Record<string, WebGLUniformLocation | null>;
+  private neutralGuidance: WebGLTexture;
 
   constructor(
     gl: WebGL2RenderingContext,
@@ -59,10 +60,21 @@ export class PhaseMap {
       uDu: gl.getUniformLocation(this.stepProgram, 'uDu'),
       uDv: gl.getUniformLocation(this.stepProgram, 'uDv'),
       uDt: gl.getUniformLocation(this.stepProgram, 'uDt'),
+      uGuidance: gl.getUniformLocation(this.stepProgram, 'uGuidance'),
+      uEdgeBoost: gl.getUniformLocation(this.stepProgram, 'uEdgeBoost'),
+      uFaceReduction: gl.getUniformLocation(this.stepProgram, 'uFaceReduction'),
     };
     this.tileUniforms = {
       uState: gl.getUniformLocation(this.tileProgram, 'uState'),
     };
+
+    // Tiles are pure (F, k) space, unaffected by image guidance: bind a
+    // neutral 1x1 texture so the step shader's Flocal == F everywhere.
+    this.neutralGuidance = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.neutralGuidance);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
 
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
@@ -103,6 +115,11 @@ export class PhaseMap {
     gl.uniform1f(this.stepUniforms.uDu, DU);
     gl.uniform1f(this.stepUniforms.uDv, DV);
     gl.uniform1f(this.stepUniforms.uDt, DT);
+    gl.uniform1f(this.stepUniforms.uEdgeBoost, 0);
+    gl.uniform1f(this.stepUniforms.uFaceReduction, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.neutralGuidance);
+    gl.uniform1i(this.stepUniforms.uGuidance, 1);
 
     for (const tile of this.tiles) {
       gl.uniform1f(this.stepUniforms.uF, tile.F);

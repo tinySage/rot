@@ -12,6 +12,11 @@ uniform float uDu;
 uniform float uDv;
 uniform float uDt;
 
+// R = edge strength, G = face mask, both blurred. See src/gl/Guidance.ts.
+uniform sampler2D uGuidance;
+uniform float uEdgeBoost;
+uniform float uFaceReduction;
+
 // 9-point weighted Laplacian:
 //   0.05  0.2  0.05
 //   0.2   -1   0.2
@@ -33,8 +38,14 @@ void main() {
   float v = c.g;
   float reaction = u * v * v;
 
-  float du = uDu * lap.r - reaction + uF * (1.0 - u);
-  float dv = uDv * lap.g + reaction - (uF + uK) * v;
+  // Faces get a reduced feed rate (rot reaches them last); edges get
+  // increased growth, so decay reads as following the photograph's contours.
+  vec2 guide = texture(uGuidance, vUv).rg;
+  float rateMul = (1.0 + uEdgeBoost * guide.r) * (1.0 - uFaceReduction * guide.g);
+  float fLocal = clamp(uF * rateMul, 0.0, 1.0);
+
+  float du = uDu * lap.r - reaction + fLocal * (1.0 - u);
+  float dv = uDv * lap.g + reaction - (fLocal + uK) * v;
 
   float newU = clamp(u + du * uDt, 0.0, 1.0);
   float newV = clamp(v + dv * uDt, 0.0, 1.0);
