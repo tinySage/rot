@@ -90,6 +90,43 @@ export function createFloatFbo(
   return { framebuffer, texture, width, height };
 }
 
+/** Uploads raw RGBA8 pixel data into a new texture — for moving a result (not a live
+ * resource) across a WebGL2 context boundary, e.g. Figure 6's own copy of the guidance
+ * texture read back from Figure 1's context. */
+export function createRgba8TextureFromData(
+  gl: WebGL2RenderingContext,
+  width: number,
+  height: number,
+  data: Uint8Array,
+): WebGLTexture {
+  const texture = gl.createTexture()!;
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  return texture;
+}
+
+/** Same as createRgba8TextureFromData, but for signed/unbounded float data (e.g. a
+ * structure-tensor eigenvector field) via RGBA16F. */
+export function createRgba16fTextureFromData(
+  gl: WebGL2RenderingContext,
+  width: number,
+  height: number,
+  data: Float32Array,
+): WebGLTexture {
+  const texture = gl.createTexture()!;
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.FLOAT, data);
+  return texture;
+}
+
 export function makeSeedData(width: number, height: number, density = 0.02): Float32Array {
   const data = new Float32Array(width * height * 4);
   for (let i = 0; i < width * height; i++) {

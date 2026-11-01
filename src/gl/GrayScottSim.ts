@@ -12,6 +12,8 @@ export interface GrayScottParams {
   dt: number;
   edgeBoost: number;
   faceReduction: number;
+  anisotropic: boolean;
+  anisoStrength: number;
 }
 
 export const DEFAULT_PARAMS: GrayScottParams = {
@@ -22,6 +24,8 @@ export const DEFAULT_PARAMS: GrayScottParams = {
   dt: 1.0,
   edgeBoost: 1.6,
   faceReduction: 0.75,
+  anisotropic: false,
+  anisoStrength: 0.85,
 };
 
 const BIOMASS_SAMPLE_WIDTH = 40;
@@ -42,6 +46,7 @@ export class GrayScottSim {
 
   private baseTexture: WebGLTexture;
   private guidanceTexture: WebGLTexture;
+  private tensorTexture: WebGLTexture;
   private quad: WebGLVertexArrayObject;
   private stepProgram: WebGLProgram;
   private compositeFlatProgram: WebGLProgram;
@@ -84,6 +89,9 @@ export class GrayScottSim {
       uGuidance: gl.getUniformLocation(this.stepProgram, 'uGuidance'),
       uEdgeBoost: gl.getUniformLocation(this.stepProgram, 'uEdgeBoost'),
       uFaceReduction: gl.getUniformLocation(this.stepProgram, 'uFaceReduction'),
+      uTensor: gl.getUniformLocation(this.stepProgram, 'uTensor'),
+      uAnisotropic: gl.getUniformLocation(this.stepProgram, 'uAnisotropic'),
+      uAnisoStrength: gl.getUniformLocation(this.stepProgram, 'uAnisoStrength'),
     };
     this.compositeFlatUniforms = {
       uBase: gl.getUniformLocation(this.compositeFlatProgram, 'uBase'),
@@ -98,11 +106,14 @@ export class GrayScottSim {
     this.baseTexture = createRgba8Texture(gl, [128, 126, 124, 255]);
     // Neutral guidance (no edge, no face) so Flocal == F until real guidance lands.
     this.guidanceTexture = createRgba8Texture(gl, [0, 0, 0, 255]);
+    // Neutral tensor (e1 = (1,0), coherence = 0): anisotropic mode behaves
+    // like isotropic mode until a real structure tensor lands.
+    this.tensorTexture = createRgba8Texture(gl, [255, 0, 0, 255]);
   }
 
-  reset(density = 0.02): void {
+  reset(density = 0.02, seedData?: Float32Array): void {
     const { gl } = this;
-    const seed = makeSeedData(this.simWidth, this.simHeight, density);
+    const seed = seedData ?? makeSeedData(this.simWidth, this.simHeight, density);
     for (const fbo of [this.fboA, this.fboB]) {
       gl.bindTexture(gl.TEXTURE_2D, fbo.texture);
       gl.texImage2D(
@@ -132,6 +143,11 @@ export class GrayScottSim {
     this.guidanceTexture = texture;
   }
 
+  /** Swaps in a precomputed structure-tensor texture (RG = e1, B = coherence). */
+  setTensorTexture(texture: WebGLTexture): void {
+    this.tensorTexture = texture;
+  }
+
   step(): void {
     const { gl } = this;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.writeFbo.framebuffer);
@@ -146,6 +162,10 @@ export class GrayScottSim {
     gl.bindTexture(gl.TEXTURE_2D, this.guidanceTexture);
     gl.uniform1i(this.stepUniforms.uGuidance, 1);
 
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.tensorTexture);
+    gl.uniform1i(this.stepUniforms.uTensor, 2);
+
     gl.uniform2f(this.stepUniforms.uTexel, 1 / this.simWidth, 1 / this.simHeight);
     gl.uniform1f(this.stepUniforms.uF, this.params.F);
     gl.uniform1f(this.stepUniforms.uK, this.params.k);
@@ -154,6 +174,8 @@ export class GrayScottSim {
     gl.uniform1f(this.stepUniforms.uDt, this.params.dt);
     gl.uniform1f(this.stepUniforms.uEdgeBoost, this.params.edgeBoost);
     gl.uniform1f(this.stepUniforms.uFaceReduction, this.params.faceReduction);
+    gl.uniform1f(this.stepUniforms.uAnisotropic, this.params.anisotropic ? 1 : 0);
+    gl.uniform1f(this.stepUniforms.uAnisoStrength, this.params.anisoStrength);
 
     gl.bindVertexArray(this.quad);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -171,12 +193,14 @@ export class GrayScottSim {
   private renderComposite(
     program: WebGLProgram,
     uniforms: Record<string, WebGLUniformLocation | null>,
+    x: number,
+    y: number,
     width: number,
     height: number,
   ): void {
     const { gl } = this;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, width, height);
+    gl.viewport(x, y, width, height);
     gl.useProgram(program);
 
     gl.activeTexture(gl.TEXTURE0);
@@ -197,13 +221,13 @@ export class GrayScottSim {
   }
 
   /** Flat dark-green-to-black overlay (the Phase 1 look). */
-  renderFlat(width: number, height: number): void {
-    this.renderComposite(this.compositeFlatProgram, this.compositeFlatUniforms, width, height);
+  renderFlat(width: number, height: number, x = 0, y = 0): void {
+    this.renderComposite(this.compositeFlatProgram, this.compositeFlatUniforms, x, y, width, height);
   }
 
   /** Height-mapped Blinn-Phong render with the full mould palette. */
-  renderLit(width: number, height: number): void {
-    this.renderComposite(this.compositeLitProgram, this.compositeLitUniforms, width, height);
+  renderLit(width: number, height: number, x = 0, y = 0): void {
+    this.renderComposite(this.compositeLitProgram, this.compositeLitUniforms, x, y, width, height);
   }
 
   /** Main display render — the lit look is the intended final rendering. */

@@ -3,12 +3,14 @@ import 'katex/dist/katex.min.css';
 import { GrayScottSim, DEFAULT_PARAMS } from './gl/GrayScottSim';
 import { PhaseMap } from './gl/PhaseMap';
 import { Guidance } from './gl/Guidance';
+import { TensorField } from './gl/TensorField';
 import { Fig4Renderer } from './gl/Fig4Renderer';
 import { generateSpecimen } from './specimen';
 import { paramStore, F_RANGE, K_RANGE } from './state';
 import { enhanceScrubNumbers } from './ui/scrubNumber';
 import { renderEquation, wireEquationHover } from './ui/equations';
 import { BiomassChart, type BiomassSample } from './ui/BiomassChart';
+import { createRgba8TextureFromData, createRgba16fTextureFromData, makeSeedData } from './gl/glUtils';
 
 const SIM_WIDTH = 480;
 const SIM_HEIGHT = 216;
@@ -25,6 +27,10 @@ const MODEL_EQUATION = String.raw`\begin{aligned}
 \frac{\partial u}{\partial t} &= D_u \nabla^2 u \;-\; u v^2 \;+\; \htmlClass{eqsym-F}{F}\,(1-u) \\[0.3em]
 \frac{\partial v}{\partial t} &= D_v \nabla^2 v \;+\; u v^2 \;-\; (\htmlClass{eqsym-F}{F} + \htmlClass{eqsym-k}{k})\,v
 \end{aligned}`;
+
+const STRUCTURE_TENSOR_EQUATION = String.raw`S_\sigma \;=\; G_\sigma * \begin{pmatrix} I_x^2 & I_xI_y \\ I_xI_y & I_y^2 \end{pmatrix}`;
+
+const DIFFUSION_TENSOR_EQUATION = String.raw`D(x) \;=\; D_{\min}\,\mathbf{e}_1\mathbf{e}_1^{\!\top} \;+\; D_{\max}\,\mathbf{e}_2\mathbf{e}_2^{\!\top}, \qquad D_{\min} < D_{\max}`;
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
@@ -57,6 +63,7 @@ app.innerHTML = `
           <button type="button" id="resetBtn">reset</button>
           <button type="button" class="upload-btn" id="uploadBtn">upload image</button>
           <input type="file" id="fileInput" accept="image/*" />
+          <button type="button" id="anisoToggle">diffusion: isotropic</button>
         </div>
       </div>
       <figcaption>
@@ -66,7 +73,8 @@ app.innerHTML = `
           composited over the image below (see &sect;3). Upload a photograph &mdash; faces
           slow it down, edges speed it up, see &sect;2 &mdash; or leave the procedurally
           generated specimen in place. The parameters below are the same <em>F</em> and
-          <em>k</em> discussed in &sect;1. You can also
+          <em>k</em> discussed in &sect;1; the diffusion toggle is explained in &sect;5. You
+          can also
           <a href="#" id="recordLink" class="caption-link">record a time-lapse (.webm)</a>
           of this figure.
         </span>
@@ -303,6 +311,69 @@ app.innerHTML = `
         </p>
       </section>
 
+      <section id="sec-anisotropic">
+        <h2>5&ensp;Anisotropic diffusion</h2>
+        <p>
+          Everywhere above, <span class="eq-var">D<sub>u</sub></span> and
+          <span class="eq-var">D<sub>v</sub></span> are scalars: diffusion that moves the same
+          amount in every direction. Real spreading across a textured surface rarely works
+          that way &mdash; it travels more freely along a seam or a grain than across it. This
+          section replaces the scalar coefficient with a 2&times;2 tensor, oriented by the
+          photograph's own local structure, computed once per upload alongside the guidance
+          field from &sect;2.
+        </p>
+        <div class="equation" id="eq-structure-tensor"></div>
+        <p>
+          <span class="eq-var">I<sub>x</sub></span> and <span class="eq-var">I<sub>y</sub></span>
+          are the same signed Sobel gradients behind the edge map in Figure&nbsp;3, just not
+          yet collapsed to a scalar magnitude. <span class="eq-var">G<sub>&sigma;</sub></span>
+          is a Gaussian blur &mdash; the raw per-pixel outer product is noisy; smoothing it is
+          what turns it into a structure tensor with a locally coherent orientation. Its
+          eigenvectors set the diffusion tensor:
+        </p>
+        <div class="equation" id="eq-diffusion-tensor"></div>
+        <p>
+          <strong>e</strong><sub>1</sub>, the eigenvector of the larger eigenvalue, points
+          across the local edge; <strong>e</strong><sub>2</sub>, perpendicular to it, points
+          along it. The solver approximates <span class="eq-var">D(x)&nabla;</span> with
+          directional finite differences: at each texel it samples two steps along
+          <strong>e</strong><sub>1</sub> and two along <strong>e</strong><sub>2</sub>
+          (bilinearly, since neither direction is generally grid-aligned), and combines their
+          second differences weighted by <span class="eq-var">D<sub>min</sub></span> and
+          <span class="eq-var">D<sub>max</sub></span> in place of the nine-point stencil used
+          in isotropic mode.
+        </p>
+        <aside class="sidenote">
+          A coherence term, (&lambda;<sub>1</sub>&minus;&lambda;<sub>2</sub>)&frasl;(&lambda;<sub>1</sub>+&lambda;<sub>2</sub>),
+          fades the anisotropy to zero in flat regions where the structure tensor's orientation
+          is unreliable &mdash; there, <span class="eq-var">D(x)</span> collapses back to the
+          isotropic case.
+        </aside>
+        <p>
+          The <strong>diffusion: isotropic / anisotropic</strong> button on Figure&nbsp;1 above
+          switches its solver between the nine-point stencil and this directional one, live,
+          on whatever image is currently loaded.
+        </p>
+      </section>
+
+      <figure class="fig page" id="fig6">
+        <div class="fig6-wrap">
+          <canvas id="fig6Canvas"></canvas>
+        </div>
+        <div class="fig6-labels">
+          <span>isotropic</span>
+          <span>anisotropic</span>
+        </div>
+        <figcaption>
+          <span class="fig-label">Fig. 6</span>
+          <span>
+            Two independent simulations, same photo, same <em>F</em> and <em>k</em>, same
+            random seed &mdash; isotropic diffusion on the left, the directional tensor from
+            &sect;5 on the right. Both restart together whenever Figure&nbsp;1 does.
+          </span>
+        </figcaption>
+      </figure>
+
       <section id="references">
         <h2>References</h2>
         <ol class="refs">
@@ -326,6 +397,8 @@ app.innerHTML = `
 `;
 
 renderEquation('eq-model', MODEL_EQUATION, true);
+renderEquation('eq-structure-tensor', STRUCTURE_TENSOR_EQUATION, true);
+renderEquation('eq-diffusion-tensor', DIFFUSION_TENSOR_EQUATION, true);
 
 // --- Figure 1: the main interactive simulation -----------------------------
 
@@ -338,6 +411,11 @@ if (!gl) {
 
 const sim = new GrayScottSim(gl, SIM_WIDTH, SIM_HEIGHT);
 const guidance = new Guidance(gl, SIM_WIDTH, SIM_HEIGHT);
+const tensorField = new TensorField(gl, SIM_WIDTH, SIM_HEIGHT);
+// Figure 6's isotropic/anisotropic comparison pair, assigned once that
+// figure's own WebGL2 context is set up further down.
+let sim6Iso: GrayScottSim | null = null;
+let sim6Aniso: GrayScottSim | null = null;
 
 const specimenCanvas = generateSpecimen(SIM_WIDTH, SIM_HEIGHT);
 sim.setBaseImage(specimenCanvas);
@@ -355,6 +433,7 @@ const pauseBtn = document.querySelector<HTMLButtonElement>('#pauseBtn')!;
 const resetBtn = document.querySelector<HTMLButtonElement>('#resetBtn')!;
 const uploadBtn = document.querySelector<HTMLButtonElement>('#uploadBtn')!;
 const fileInput = document.querySelector<HTMLInputElement>('#fileInput')!;
+const anisoToggle = document.querySelector<HTMLButtonElement>('#anisoToggle')!;
 const fpsReadout = document.querySelector<HTMLSpanElement>('#fpsReadout')!;
 const resReadout = document.querySelector<HTMLSpanElement>('#resReadout')!;
 const stepsReadout = document.querySelector<HTMLSpanElement>('#stepsReadout')!;
@@ -388,9 +467,12 @@ pauseBtn.addEventListener('click', () => {
   pauseBtn.textContent = paused ? 'play' : 'pause';
 });
 
-resetBtn.addEventListener('click', () => {
-  sim.reset();
-  resetBiomassHistory();
+resetBtn.addEventListener('click', () => resetAllSims());
+
+anisoToggle.addEventListener('click', () => {
+  sim.params.anisotropic = !sim.params.anisotropic;
+  anisoToggle.textContent = `diffusion: ${sim.params.anisotropic ? 'anisotropic' : 'isotropic'}`;
+  anisoToggle.classList.toggle('active', sim.params.anisotropic);
 });
 
 uploadBtn.addEventListener('click', () => fileInput.click());
@@ -418,14 +500,25 @@ function loadImageFile(file: File): void {
   const img = new Image();
   img.onload = () => {
     sim.setBaseImage(img);
-    sim.reset();
-    resetBiomassHistory();
     canvasWrap.classList.add('has-image');
     fig4.setBaseImage(img);
+    sim6Iso?.setBaseImage(img);
+    sim6Aniso?.setBaseImage(img);
+    resetAllSims();
     void updateGuidance(img, img.naturalWidth, img.naturalHeight);
     URL.revokeObjectURL(url);
   };
   img.src = url;
+}
+
+/** Resets Figure 1's sim and Figure 6's comparison pair to one shared random seed, so
+ * isotropic vs. anisotropic differences come from the diffusion mode alone. */
+function resetAllSims(): void {
+  const seed = makeSeedData(SIM_WIDTH, SIM_HEIGHT, 0.02);
+  sim.reset(0.02, seed);
+  sim6Iso?.reset(0.02, seed);
+  sim6Aniso?.reset(0.02, seed);
+  resetBiomassHistory();
 }
 
 // --- Figure 5: biomass over time --------------------------------------------
@@ -583,9 +676,25 @@ async function updateGuidance(
   sourceWidth: number,
   sourceHeight: number,
 ): Promise<void> {
+  tensorField.update(source, sourceWidth, sourceHeight);
+  sim.setTensorTexture(tensorField.texture);
+
   await guidance.update(source, sourceWidth, sourceHeight);
   sim.setGuidanceTexture(guidance.texture);
   renderGuidancePanels();
+
+  // Figure 6 lives in its own WebGL2 context, so it gets its own copies of
+  // the (already computed) guidance and tensor results, not the live
+  // textures — see §4's note on Figure 4 for why this is cross-context data,
+  // not a second computation.
+  if (sim6Iso && sim6Aniso) {
+    const guidanceTex6 = createRgba8TextureFromData(sim6Iso.gl, SIM_WIDTH, SIM_HEIGHT, guidance.pixelData);
+    const tensorTex6 = createRgba16fTextureFromData(sim6Iso.gl, SIM_WIDTH, SIM_HEIGHT, tensorField.readPixelData());
+    sim6Iso.setGuidanceTexture(guidanceTex6);
+    sim6Iso.setTensorTexture(tensorTex6);
+    sim6Aniso.setGuidanceTexture(guidanceTex6);
+    sim6Aniso.setTensorTexture(tensorTex6);
+  }
 }
 
 function resizeCanvas(): void {
@@ -662,6 +771,58 @@ function fig4Frame(): void {
   requestAnimationFrame(fig4Frame);
 }
 requestAnimationFrame(fig4Frame);
+
+// --- Figure 6: isotropic vs anisotropic diffusion, independently simulated -
+
+const fig6Canvas = document.querySelector<HTMLCanvasElement>('#fig6Canvas')!;
+const fig6Wrap = document.querySelector<HTMLDivElement>('.fig6-wrap')!;
+const fig6Gl = fig6Canvas.getContext('webgl2', { antialias: false, alpha: false });
+if (!fig6Gl) {
+  throw new Error('WebGL2 is not available in this browser.');
+}
+
+sim6Iso = new GrayScottSim(fig6Gl, SIM_WIDTH, SIM_HEIGHT);
+sim6Iso.params.anisotropic = false;
+sim6Aniso = new GrayScottSim(fig6Gl, SIM_WIDTH, SIM_HEIGHT);
+sim6Aniso.params.anisotropic = true;
+sim6Iso.setBaseImage(specimenCanvas);
+sim6Aniso.setBaseImage(specimenCanvas);
+resetAllSims();
+
+paramStore.subscribe(({ F, k }) => {
+  if (!sim6Iso || !sim6Aniso) return;
+  sim6Iso.params.F = F;
+  sim6Iso.params.k = k;
+  sim6Aniso.params.F = F;
+  sim6Aniso.params.k = k;
+});
+
+function resizeFig6Canvas(): void {
+  const rect = fig6Wrap.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.min(Math.round(rect.width * dpr), MAX_CANVAS_WIDTH);
+  const height = Math.round(rect.height * dpr);
+  if (fig6Canvas.width !== width || fig6Canvas.height !== height) {
+    fig6Canvas.width = width;
+    fig6Canvas.height = height;
+  }
+}
+new ResizeObserver(resizeFig6Canvas).observe(fig6Wrap);
+resizeFig6Canvas();
+
+function fig6Frame(): void {
+  if (sim6Iso && sim6Aniso) {
+    if (!paused) {
+      sim6Iso.stepN(stepsPerFrame);
+      sim6Aniso.stepN(stepsPerFrame);
+    }
+    const halfWidth = Math.floor(fig6Canvas.width / 2);
+    sim6Iso.renderLit(halfWidth, fig6Canvas.height, 0, 0);
+    sim6Aniso.renderLit(fig6Canvas.width - halfWidth, fig6Canvas.height, halfWidth, 0);
+  }
+  requestAnimationFrame(fig6Frame);
+}
+requestAnimationFrame(fig6Frame);
 
 // --- Figure 2: the (F, k) phase map -----------------------------------------
 
