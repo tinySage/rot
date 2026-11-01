@@ -533,6 +533,46 @@ body.highlight-k .phase-guide-k {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Figure 1 caption: record-a-time-lapse text link                        */
+/* ---------------------------------------------------------------------- */
+
+.caption-link {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.caption-link:hover {
+  color: var(--accent);
+  text-decoration-style: solid;
+}
+
+.caption-link.recording {
+  color: var(--accent);
+  text-decoration-style: solid;
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Figure 5: biomass chart                                                */
+/* ---------------------------------------------------------------------- */
+
+.biomass-chart-wrap {
+  width: 100%;
+  aspect-ratio: 3 / 1;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+}
+
+.biomass-chart-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------------------------------------------------------------------- */
 /* References                                                             */
 /* ---------------------------------------------------------------------- */
 
