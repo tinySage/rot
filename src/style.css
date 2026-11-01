@@ -231,3 +231,268 @@ figcaption .fig-label {
   overflow: hidden;
   clip: rect(0 0 0 0);
 }
+
+/* ---------------------------------------------------------------------- */
+/* Prose and sections                                                     */
+/* ---------------------------------------------------------------------- */
+
+.prose {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.prose section {
+  margin: 3rem 0;
+}
+
+.prose h2 {
+  font-family: 'Newsreader', serif;
+  font-weight: 500;
+  font-size: 1.5rem;
+  letter-spacing: -0.005em;
+  margin: 0 0 1rem;
+}
+
+.prose p {
+  margin: 0 0 1.1rem;
+}
+
+.prose code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85em;
+  background: var(--rule);
+  padding: 0.05em 0.3em;
+  border-radius: 2px;
+}
+
+.eq-var {
+  font-family: 'Newsreader', serif;
+  font-style: italic;
+}
+
+a.cite {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.78em;
+  color: var(--muted);
+  text-decoration: none;
+  vertical-align: super;
+}
+
+a.cite:hover {
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Sidenotes                                                              */
+/* ---------------------------------------------------------------------- */
+
+.sidenote {
+  float: right;
+  clear: right;
+  width: 220px;
+  margin-right: -260px;
+  margin-top: 0.15rem;
+  margin-bottom: 0.6rem;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+@media (max-width: 1000px) {
+  .sidenote {
+    float: none;
+    clear: both;
+    display: block;
+    width: auto;
+    margin: 0.8rem 0;
+    padding-left: 0.8rem;
+    border-left: 2px solid var(--rule);
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Equations                                                              */
+/* ---------------------------------------------------------------------- */
+
+.equation {
+  margin: 1.5rem 0;
+  overflow-x: auto;
+}
+
+.eqsym-F,
+.eqsym-k {
+  cursor: default;
+  border-radius: 2px;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.eqsym-F:hover,
+.eqsym-k:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.control.highlight label .readout,
+.control.highlight {
+  color: var(--accent);
+}
+
+.control.highlight input[type='range'] {
+  outline: 1px solid var(--accent);
+  outline-offset: 4px;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Scrubbable inline numbers                                              */
+/* ---------------------------------------------------------------------- */
+
+.scrub {
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9em;
+  color: var(--accent);
+  border-bottom: 1px dashed var(--accent);
+  cursor: ew-resize;
+  padding: 0 0.1em;
+  touch-action: none;
+  user-select: none;
+}
+
+.scrub:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.scrub.scrubbing,
+.scrub:focus-visible {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  outline: none;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Figure 2: phase map                                                    */
+/* ---------------------------------------------------------------------- */
+
+figure.fig.page .phase-map-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 512px;
+  aspect-ratio: 1 / 1;
+  margin: 0 auto;
+  background: #000;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.phase-map-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.phase-crosshair {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  margin-top: -8px;
+  border: 1px solid #f6f3ec;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+
+.phase-crosshair::before,
+.phase-crosshair::after {
+  content: '';
+  position: absolute;
+  background: #f6f3ec;
+}
+
+.phase-crosshair::before {
+  left: 50%;
+  top: -5px;
+  width: 1px;
+  height: 4px;
+}
+
+.phase-crosshair::after {
+  top: 50%;
+  left: -5px;
+  width: 4px;
+  height: 1px;
+}
+
+.phase-guide {
+  position: absolute;
+  background: var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.phase-guide-f {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-left: -0.5px;
+}
+
+.phase-guide-k {
+  left: 0;
+  right: 0;
+  height: 1px;
+  margin-top: -0.5px;
+}
+
+body.highlight-F .phase-guide-f,
+body.highlight-k .phase-guide-k {
+  opacity: 0.8;
+}
+
+.phase-axis-label {
+  max-width: 512px;
+  margin: 0 auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.phase-axis-label.phase-axis-f {
+  text-align: right;
+  margin-top: 0.4rem;
+}
+
+.phase-axis-label.phase-axis-k {
+  margin-top: -0.4rem;
+}
+
+/* ---------------------------------------------------------------------- */
+/* References                                                             */
+/* ---------------------------------------------------------------------- */
+
+.refs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: ref;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.refs li {
+  position: relative;
+  padding-left: 2.1em;
+  margin-bottom: 0.8rem;
+}
+
+.refs li::before {
+  content: '[' counter(ref) ']';
+  counter-increment: ref;
+  position: absolute;
+  left: 0;
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--muted);
+}

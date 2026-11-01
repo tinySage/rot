@@ -1,7 +1,7 @@
 import quadVert from '../shaders/quad.vert.glsl?raw';
 import stepFrag from '../shaders/step.frag.glsl?raw';
 import compositeFrag from '../shaders/composite.frag.glsl?raw';
-import { createFloatFbo, createProgram, createQuad, type FloatFbo } from './glUtils';
+import { createFloatFbo, createProgram, createQuad, makeSeedData, type FloatFbo } from './glUtils';
 
 export interface GrayScottParams {
   F: number;
@@ -47,7 +47,7 @@ export class GrayScottSim {
       throw new Error('EXT_color_buffer_float is required for this simulation');
     }
 
-    this.fboA = createFloatFbo(gl, simWidth, simHeight, this.makeSeed());
+    this.fboA = createFloatFbo(gl, simWidth, simHeight, makeSeedData(simWidth, simHeight));
     this.fboB = createFloatFbo(gl, simWidth, simHeight);
     this.readFbo = this.fboA;
     this.writeFbo = this.fboB;
@@ -89,40 +89,9 @@ export class GrayScottSim {
     );
   }
 
-  private makeSeed(density = 0.02): Float32Array {
-    const { simWidth: w, simHeight: h } = this;
-    const data = new Float32Array(w * h * 4);
-    for (let i = 0; i < w * h; i++) {
-      data[i * 4] = 1.0; // u
-      data[i * 4 + 1] = 0.0; // v
-      data[i * 4 + 2] = 0.0;
-      data[i * 4 + 3] = 1.0;
-    }
-
-    const area = w * h;
-    const blobCount = Math.max(4, Math.round(area * density / 120));
-    for (let b = 0; b < blobCount; b++) {
-      const cx = Math.floor(Math.random() * w);
-      const cy = Math.floor(Math.random() * h);
-      const radius = 2 + Math.floor(Math.random() * 3);
-      for (let dy = -radius; dy <= radius; dy++) {
-        for (let dx = -radius; dx <= radius; dx++) {
-          if (dx * dx + dy * dy > radius * radius) continue;
-          const x = cx + dx;
-          const y = cy + dy;
-          if (x < 0 || x >= w || y < 0 || y >= h) continue;
-          const idx = (y * w + x) * 4;
-          data[idx] = 0.5;
-          data[idx + 1] = 0.5 + Math.random() * 0.25;
-        }
-      }
-    }
-    return data;
-  }
-
   reset(density = 0.02): void {
     const { gl } = this;
-    const seed = this.makeSeed(density);
+    const seed = makeSeedData(this.simWidth, this.simHeight, density);
     for (const fbo of [this.fboA, this.fboB]) {
       gl.bindTexture(gl.TEXTURE_2D, fbo.texture);
       gl.texImage2D(

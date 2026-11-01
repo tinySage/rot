@@ -90,6 +90,36 @@ export function createFloatFbo(
   return { framebuffer, texture, width, height };
 }
 
+export function makeSeedData(width: number, height: number, density = 0.02): Float32Array {
+  const data = new Float32Array(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    data[i * 4] = 1.0; // u
+    data[i * 4 + 1] = 0.0; // v
+    data[i * 4 + 2] = 0.0;
+    data[i * 4 + 3] = 1.0;
+  }
+
+  const area = width * height;
+  const blobCount = Math.max(3, Math.round((area * density) / 120));
+  for (let b = 0; b < blobCount; b++) {
+    const cx = Math.floor(Math.random() * width);
+    const cy = Math.floor(Math.random() * height);
+    const radius = 2 + Math.floor(Math.random() * 3);
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (dx * dx + dy * dy > radius * radius) continue;
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x < 0 || x >= width || y < 0 || y >= height) continue;
+        const idx = (y * width + x) * 4;
+        data[idx] = 0.5;
+        data[idx + 1] = 0.5 + Math.random() * 0.25;
+      }
+    }
+  }
+  return data;
+}
+
 export function createQuad(gl: WebGL2RenderingContext): WebGLVertexArrayObject {
   const vao = gl.createVertexArray();
   if (!vao) throw new Error('Failed to create VAO');
