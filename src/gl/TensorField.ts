@@ -34,6 +34,10 @@ export class TensorField {
     this.width = width;
     this.height = height;
 
+    if (!gl.getExtension('EXT_color_buffer_float')) {
+      throw new Error('EXT_color_buffer_float is required for the structure tensor');
+    }
+
     this.quad = createQuad(gl);
     this.gradientProgram = createProgram(gl, quadVert, gradientTensorFrag);
     this.blurProgram = createProgram(gl, quadVert, blurFrag);

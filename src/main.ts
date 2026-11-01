@@ -10,7 +10,11 @@ import { paramStore, F_RANGE, K_RANGE } from './state';
 import { enhanceScrubNumbers } from './ui/scrubNumber';
 import { renderEquation, wireEquationHover } from './ui/equations';
 import { BiomassChart, type BiomassSample } from './ui/BiomassChart';
-import { createRgba8TextureFromData, createRgba16fTextureFromData, makeSeedData } from './gl/glUtils';
+import { makeSeedData } from './gl/glUtils';
+import type { SimBackend } from './gpu/SimBackend';
+import { WebGPUSim } from './gpu/WebGPUSim';
+import { requestWebGPUDevice } from './gpu/detectWebGPU';
+import { runBenchmark, type BenchmarkResult } from './gpu/Benchmark';
 
 const SIM_WIDTH = 480;
 const SIM_HEIGHT = 216;
@@ -258,14 +262,15 @@ app.innerHTML = `
         <h2>4&ensp;Implementation and performance</h2>
         <p>
           The page is a dependency-light Vite and TypeScript build with no UI framework:
-          WebGL2 is driven directly, shaders live as separate <code>.glsl</code> files
-          imported as raw text, and layout and type follow the rules in this repository's
-          <code>CLAUDE.md</code> rather than a component library. KaTeX renders the one
-          equation on this page; nothing else here depends on a math-typesetting pass at
-          runtime.
+          WebGL2 and WebGPU are both driven directly, shaders live as separate
+          <code>.glsl</code> and <code>.wgsl</code> files imported as raw text, and layout
+          and type follow the rules in this repository's <code>CLAUDE.md</code> rather than
+          a component library. KaTeX renders the equations on this page; nothing else here
+          depends on a math-typesetting pass at runtime.
         </p>
         <p>
-          Right now this page is running Figure&nbsp;1 at
+          Right now this page is running Figure&nbsp;1 on
+          <span class="readout" id="backendReadout">&mdash;</span> at
           <span class="readout" id="fpsReadout">&mdash;</span> fps, at a simulation
           resolution of <span class="readout" id="resReadout">&mdash;</span>, with
           <span class="readout" id="stepsReadout">&mdash;</span> reaction&ndash;diffusion
@@ -281,10 +286,10 @@ app.innerHTML = `
         <figcaption>
           <span class="fig-label">Fig. 5</span>
           <span>
-            Total biomass (&sum;<span class="eq-var">v</span>) in Figure&nbsp;1 over time.
-            Sampled every few frames from a GPU-downsampled copy of the state texture, not
-            the full-resolution buffer, so the periodic <code>readPixels</code> this needs
-            stays cheap. Resets whenever the simulation does.
+            Total biomass (&sum;<span class="eq-var">v</span>) in Figure&nbsp;1 over time,
+            sampled every few frames from whichever backend is active &mdash; downsampled on
+            the GPU first on WebGL2, read back directly on WebGPU (&sect;4) &mdash; so the
+            periodic readback this needs stays cheap. Resets whenever the simulation does.
           </span>
         </figcaption>
       </figure>
@@ -309,6 +314,23 @@ app.innerHTML = `
           state is read back and re-uploaded into Figure&nbsp;4's own context every third
           frame, where its two composite shaders run fresh.
         </p>
+        <p>
+          Figure&nbsp;1's solver itself has a second implementation: a WebGPU compute
+          pipeline, written in WGSL, that the page uses automatically when
+          <code>navigator.gpu</code> is available and falls back from silently otherwise.
+          State lives in a flat <code>array&lt;vec2&lt;f32&gt;&gt;</code> storage buffer
+          rather than a texture; the isotropic nine-point stencil loads an 8&times;8 tile of
+          it, plus a one-texel halo, into workgroup shared memory once per workgroup, so each
+          of the 64 output texels reuses its neighbours' loads instead of re-fetching them
+          from global memory nine times over. The anisotropic path (&sect;5) samples in an
+          arbitrary direction, so it reads global memory directly and does its own bilinear
+          interpolation &mdash; storage buffers have none built in.
+        </p>
+        <p id="benchmarkPara">
+          <button type="button" id="benchmarkBtn">run benchmark</button>
+          <span id="benchmarkStatus"></span>
+        </p>
+        <div id="benchmarkTableWrap"></div>
       </section>
 
       <section id="sec-anisotropic">
@@ -404,16 +426,49 @@ renderEquation('eq-diffusion-tensor', DIFFUSION_TENSOR_EQUATION, true);
 
 const canvas = document.querySelector<HTMLCanvasElement>('#simCanvas')!;
 const canvasWrap = document.querySelector<HTMLDivElement>('#canvasWrap')!;
-const gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
-if (!gl) {
-  throw new Error('WebGL2 is not available in this browser.');
+
+// Figure 1 prefers WebGPU (§4) and falls back to WebGL2 automatically. A
+// canvas's context type is fixed on first getContext() call, so the backend
+// has to be decided — asynchronously, since requesting a GPUDevice is async —
+// before either context is created.
+function createWebGL2Backend(): GrayScottSim {
+  const webglGl = canvas.getContext('webgl2', { antialias: false, alpha: false });
+  if (!webglGl) {
+    throw new Error('Neither WebGPU nor WebGL2 is available in this browser.');
+  }
+  return new GrayScottSim(webglGl, SIM_WIDTH, SIM_HEIGHT);
 }
 
-const sim = new GrayScottSim(gl, SIM_WIDTH, SIM_HEIGHT);
-const guidance = new Guidance(gl, SIM_WIDTH, SIM_HEIGHT);
-const tensorField = new TensorField(gl, SIM_WIDTH, SIM_HEIGHT);
-// Figure 6's isotropic/anisotropic comparison pair, assigned once that
-// figure's own WebGL2 context is set up further down.
+let backendName: 'WebGPU' | 'WebGL2' = 'WebGL2';
+let sim: SimBackend;
+const gpuDevice = await requestWebGPUDevice();
+if (gpuDevice) {
+  try {
+    sim = new WebGPUSim(gpuDevice, canvas, SIM_WIDTH, SIM_HEIGHT);
+    backendName = 'WebGPU';
+  } catch (err) {
+    console.warn('WebGPU initialised but Figure 1 setup failed, falling back to WebGL2:', err);
+    sim = createWebGL2Backend();
+  }
+} else {
+  sim = createWebGL2Backend();
+}
+
+// Image guidance (§2) and the structure tensor (§5) are fragment-shader
+// pipelines and need a WebGL2 context regardless of which backend is
+// driving Figure 1's solver, so they get their own, detached from the
+// canvas above.
+const guidanceCanvas = document.createElement('canvas');
+guidanceCanvas.width = SIM_WIDTH;
+guidanceCanvas.height = SIM_HEIGHT;
+const guidanceGl = guidanceCanvas.getContext('webgl2', { antialias: false, alpha: false });
+if (!guidanceGl) {
+  throw new Error('WebGL2 is required to compute image guidance.');
+}
+const guidance = new Guidance(guidanceGl, SIM_WIDTH, SIM_HEIGHT);
+const tensorField = new TensorField(guidanceGl, SIM_WIDTH, SIM_HEIGHT);
+// Figure 6's isotropic/anisotropic comparison pair (always WebGL2 — see its
+// own section further down), assigned once that figure's own context is set up.
 let sim6Iso: GrayScottSim | null = null;
 let sim6Aniso: GrayScottSim | null = null;
 
@@ -437,6 +492,8 @@ const anisoToggle = document.querySelector<HTMLButtonElement>('#anisoToggle')!;
 const fpsReadout = document.querySelector<HTMLSpanElement>('#fpsReadout')!;
 const resReadout = document.querySelector<HTMLSpanElement>('#resReadout')!;
 const stepsReadout = document.querySelector<HTMLSpanElement>('#stepsReadout')!;
+const backendReadout = document.querySelector<HTMLSpanElement>('#backendReadout')!;
+backendReadout.textContent = backendName;
 
 paramStore.subscribe(({ F, k }) => {
   sim.params.F = F;
@@ -535,9 +592,9 @@ function resetBiomassHistory(): void {
   biomassChart.setSamples(biomassHistory);
 }
 
-function recordBiomassSample(): void {
+async function recordBiomassSample(): Promise<void> {
   const t = (performance.now() - simStartTime) / 1000;
-  const v = sim.readBiomass();
+  const v = await sim.readBiomass();
   biomassHistory = [...biomassHistory, { t, v }];
   if (biomassHistory.length > BIOMASS_MAX_SAMPLES) {
     biomassHistory = biomassHistory.slice(biomassHistory.length - BIOMASS_MAX_SAMPLES);
@@ -677,24 +734,21 @@ async function updateGuidance(
   sourceHeight: number,
 ): Promise<void> {
   tensorField.update(source, sourceWidth, sourceHeight);
-  sim.setTensorTexture(tensorField.texture);
+  const tensorData = tensorField.readPixelData();
+  sim.setTensorData(tensorData);
 
   await guidance.update(source, sourceWidth, sourceHeight);
-  sim.setGuidanceTexture(guidance.texture);
+  sim.setGuidanceData(guidance.pixelData);
   renderGuidancePanels();
 
-  // Figure 6 lives in its own WebGL2 context, so it gets its own copies of
-  // the (already computed) guidance and tensor results, not the live
-  // textures — see §4's note on Figure 4 for why this is cross-context data,
-  // not a second computation.
-  if (sim6Iso && sim6Aniso) {
-    const guidanceTex6 = createRgba8TextureFromData(sim6Iso.gl, SIM_WIDTH, SIM_HEIGHT, guidance.pixelData);
-    const tensorTex6 = createRgba16fTextureFromData(sim6Iso.gl, SIM_WIDTH, SIM_HEIGHT, tensorField.readPixelData());
-    sim6Iso.setGuidanceTexture(guidanceTex6);
-    sim6Iso.setTensorTexture(tensorTex6);
-    sim6Aniso.setGuidanceTexture(guidanceTex6);
-    sim6Aniso.setTensorTexture(tensorTex6);
-  }
+  // Guidance and the structure tensor always live in their own WebGL2
+  // context now (see the backend setup above), so every consumer — Figure
+  // 1 whichever backend it's on, and Figure 6's pair — takes the same raw
+  // (edge, face) / (e1, coherence) arrays, not a shared GPU texture.
+  sim6Iso?.setGuidanceData(guidance.pixelData);
+  sim6Iso?.setTensorData(tensorData);
+  sim6Aniso?.setGuidanceData(guidance.pixelData);
+  sim6Aniso?.setTensorData(tensorData);
 }
 
 function resizeCanvas(): void {
@@ -718,7 +772,7 @@ function frame(): void {
   if (!paused) {
     sim.stepN(stepsPerFrame);
     biomassFrameCount++;
-    if (biomassFrameCount % BIOMASS_SAMPLE_EVERY_FRAMES === 0) recordBiomassSample();
+    if (biomassFrameCount % BIOMASS_SAMPLE_EVERY_FRAMES === 0) void recordBiomassSample();
   }
   sim.renderToCanvas(canvas.width, canvas.height);
 
@@ -762,10 +816,17 @@ new ResizeObserver(resizeFig4Canvas).observe(fig4Wrap);
 resizeFig4Canvas();
 
 let fig4FrameCount = 0;
+let fig4ReadInFlight = false;
 function fig4Frame(): void {
   fig4FrameCount++;
-  if (!paused && fig4FrameCount % FIG4_STATE_UPDATE_EVERY === 0) {
-    fig4.updateState(sim.readStateData());
+  if (!paused && !fig4ReadInFlight && fig4FrameCount % FIG4_STATE_UPDATE_EVERY === 0) {
+    fig4ReadInFlight = true;
+    sim
+      .readStateData()
+      .then((data) => fig4.updateState(data))
+      .finally(() => {
+        fig4ReadInFlight = false;
+      });
   }
   fig4.render(fig4Canvas.width, fig4Canvas.height);
   requestAnimationFrame(fig4Frame);
@@ -929,4 +990,56 @@ document.querySelectorAll<HTMLElement>('[data-scrub-speed]').forEach((el) => {
       // already released
     }
   });
+});
+
+// --- §4: WebGPU vs WebGL2 benchmark ------------------------------------------
+
+const benchmarkBtn = document.querySelector<HTMLButtonElement>('#benchmarkBtn')!;
+const benchmarkStatus = document.querySelector<HTMLSpanElement>('#benchmarkStatus')!;
+const benchmarkTableWrap = document.querySelector<HTMLDivElement>('#benchmarkTableWrap')!;
+
+function renderBenchmarkTable(results: BenchmarkResult[]): void {
+  const resolutions = [...new Set(results.map((r) => r.resolution))].sort((a, b) => a - b);
+  const byKey = new Map(results.map((r) => [`${r.backend}:${r.resolution}`, r.medianMs]));
+  const cell = (backend: 'WebGL2' | 'WebGPU', res: number): string => {
+    const ms = byKey.get(`${backend}:${res}`);
+    return ms === undefined ? '&mdash;' : `${ms.toFixed(2)}&nbsp;ms`;
+  };
+
+  const rows = resolutions
+    .map(
+      (res) => `
+      <tr>
+        <td>${res}&times;${res}</td>
+        <td>${cell('WebGL2', res)}</td>
+        <td>${cell('WebGPU', res)}</td>
+      </tr>`,
+    )
+    .join('');
+
+  benchmarkTableWrap.innerHTML = `
+    <table class="benchmark-table">
+      <thead>
+        <tr><th>resolution</th><th>WebGL2</th><th>WebGPU</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="benchmark-note">median ms/step over ${24} timed steps per cell, after a 5-step warm-up.</p>
+  `;
+}
+
+benchmarkBtn.addEventListener('click', () => {
+  void (async () => {
+    benchmarkBtn.disabled = true;
+    benchmarkTableWrap.innerHTML = '';
+    try {
+      const results = await runBenchmark((msg) => {
+        benchmarkStatus.textContent = msg;
+      });
+      benchmarkStatus.textContent = '';
+      renderBenchmarkTable(results);
+    } finally {
+      benchmarkBtn.disabled = false;
+    }
+  })();
 });

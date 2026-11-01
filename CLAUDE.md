@@ -4,7 +4,7 @@
 The site is a living research paper (Distill.pub tradition). Title: "Rot: content-aware reaction–diffusion on photographs". Byline: Muktanan Mohapatra. Every figure is a live simulation. It must read as a publication, not a landing page.
 
 ## Stack
-Vite + TypeScript, no framework. WebGL2 (WebGPU comes later). KaTeX for equations. @mediapipe/tasks-vision FaceDetector. Fonts self-hosted via @fontsource. Shaders in src/shaders/*.glsl. Static deploy on Vercel.
+Vite + TypeScript, no framework. WebGPU compute (WGSL, src/gpu/*.wgsl) for the solver, with an automatic WebGL2 fallback (src/shaders/*.glsl) when navigator.gpu is unavailable. KaTeX for equations. @mediapipe/tasks-vision FaceDetector. Fonts self-hosted via @fontsource. Static deploy on Vercel.
 
 ## Type
 - Body: Newsreader, 19px/1.6, optical sizing on. Headings Newsreader 500, tight tracking.

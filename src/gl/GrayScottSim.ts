@@ -2,19 +2,18 @@ import quadVert from '../shaders/quad.vert.glsl?raw';
 import stepFrag from '../shaders/step.frag.glsl?raw';
 import compositeFrag from '../shaders/composite.frag.glsl?raw';
 import compositeLitFrag from '../shaders/composite-lit.frag.glsl?raw';
-import { createFloatFbo, createProgram, createQuad, makeSeedData, type FloatFbo } from './glUtils';
+import {
+  createFloatFbo,
+  createProgram,
+  createQuad,
+  createRgba8TextureFromData,
+  createRgba16fTextureFromData,
+  makeSeedData,
+  type FloatFbo,
+} from './glUtils';
+import type { SimBackend, SimParams } from '../gpu/SimBackend';
 
-export interface GrayScottParams {
-  F: number;
-  k: number;
-  Du: number;
-  Dv: number;
-  dt: number;
-  edgeBoost: number;
-  faceReduction: number;
-  anisotropic: boolean;
-  anisoStrength: number;
-}
+export type GrayScottParams = SimParams;
 
 export const DEFAULT_PARAMS: GrayScottParams = {
   F: 0.037,
@@ -31,7 +30,7 @@ export const DEFAULT_PARAMS: GrayScottParams = {
 const BIOMASS_SAMPLE_WIDTH = 40;
 const BIOMASS_SAMPLE_HEIGHT = 18;
 
-export class GrayScottSim {
+export class GrayScottSim implements SimBackend {
   readonly gl: WebGL2RenderingContext;
   readonly simWidth: number;
   readonly simHeight: number;
@@ -148,6 +147,18 @@ export class GrayScottSim {
     this.tensorTexture = texture;
   }
 
+  /** SimBackend-uniform entry point: builds a guidance texture in this context from raw
+   * RGBA8 pixel data (e.g. read back from another context's Guidance instance). */
+  setGuidanceData(data: Uint8Array): void {
+    this.setGuidanceTexture(createRgba8TextureFromData(this.gl, this.simWidth, this.simHeight, data));
+  }
+
+  /** SimBackend-uniform entry point: builds a tensor texture in this context from raw
+   * RGBA float data (e.g. read back from another context's TensorField instance). */
+  setTensorData(data: Float32Array): void {
+    this.setTensorTexture(createRgba16fTextureFromData(this.gl, this.simWidth, this.simHeight, data));
+  }
+
   step(): void {
     const { gl } = this;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.writeFbo.framebuffer);
@@ -235,8 +246,10 @@ export class GrayScottSim {
     this.renderLit(width, height);
   }
 
-  /** Reads back the current (u, v) state as RGBA floats, for sharing with another context. */
-  readStateData(): Float32Array {
+  /** Reads back the current (u, v) state as RGBA floats, for sharing with another context.
+   * Async to match WebGPUSim's (necessarily async) readback, even though WebGL2's
+   * readPixels is itself synchronous. */
+  async readStateData(): Promise<Float32Array> {
     const { gl } = this;
     const buffer = new Float32Array(this.simWidth * this.simHeight * 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.readFbo.framebuffer);
@@ -250,7 +263,7 @@ export class GrayScottSim {
    * the full-resolution state into a tiny buffer first, so the periodic
    * readPixels this needs stays cheap even sampled every few frames.
    */
-  readBiomass(): number {
+  async readBiomass(): Promise<number> {
     const { gl } = this;
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.readFbo.framebuffer);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.biomassFbo.framebuffer);
@@ -283,6 +296,23 @@ export class GrayScottSim {
     for (let i = 0; i < n; i++) sum += this.biomassBuffer[i * 4 + 1];
     const avgV = sum / n;
     return avgV * this.simWidth * this.simHeight;
+  }
+
+  /** Frees GPU resources — used by the benchmark (§4), which creates one throwaway
+   * instance per resolution and would otherwise leak framebuffers at 2048x2048. */
+  destroy(): void {
+    const { gl } = this;
+    for (const fbo of [this.fboA, this.fboB, this.biomassFbo]) {
+      gl.deleteFramebuffer(fbo.framebuffer);
+      gl.deleteTexture(fbo.texture);
+    }
+    gl.deleteTexture(this.baseTexture);
+    gl.deleteTexture(this.guidanceTexture);
+    gl.deleteTexture(this.tensorTexture);
+    gl.deleteProgram(this.stepProgram);
+    gl.deleteProgram(this.compositeFlatProgram);
+    gl.deleteProgram(this.compositeLitProgram);
+    gl.deleteVertexArray(this.quad);
   }
 }
 
