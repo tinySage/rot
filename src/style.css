@@ -1,0 +1,233 @@
+@import '@fontsource/newsreader/400.css';
+@import '@fontsource/newsreader/500.css';
+@import '@fontsource/newsreader/400-italic.css';
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
+:root {
+  --paper: #f6f3ec;
+  --ink: #1c1b19;
+  --muted: #6b6760;
+  --rule: #d9d4c8;
+  --accent: #9a3412;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #141412;
+    --ink: #e8e4da;
+    --muted: #8f8a80;
+    --rule: #2e2c28;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body {
+  font-family: 'Newsreader', serif;
+  font-size: 19px;
+  line-height: 1.6;
+  font-optical-sizing: auto;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+header.masthead {
+  width: 100%;
+  max-width: 680px;
+  margin: 4rem auto 2rem;
+  padding: 0 1rem;
+}
+
+header.masthead h1 {
+  font-family: 'Newsreader', serif;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  font-size: 2.6rem;
+  line-height: 1.15;
+  margin: 0 0 0.6rem;
+}
+
+header.masthead p.byline {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+  text-transform: none;
+}
+
+main {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+figure.fig {
+  margin: 2.5rem 0;
+  width: 100%;
+}
+
+figure.fig.bleed {
+  max-width: 100vw;
+}
+
+figure.fig.page {
+  max-width: 1080px;
+  padding: 0 1rem;
+}
+
+.fig-canvas-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 7.2;
+  background: #000;
+  overflow: hidden;
+}
+
+.fig-canvas-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.drop-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  color: #f6f3ec;
+  background: rgba(0, 0, 0, 0);
+  transition: background-color 120ms ease, opacity 200ms ease;
+}
+
+.fig-canvas-wrap.has-image .drop-hint {
+  opacity: 0;
+}
+
+.fig-canvas-wrap.has-image.drag-over .drop-hint {
+  opacity: 1;
+}
+
+.fig-canvas-wrap.drag-over .drop-hint {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.drop-hint span {
+  border: 1px solid rgba(246, 243, 236, 0.5);
+  padding: 0.4em 0.9em;
+  letter-spacing: 0.02em;
+}
+
+.fig-controls {
+  max-width: 680px;
+  margin: 1rem auto 0;
+  padding: 0 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem 2rem;
+  align-items: flex-end;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 140px;
+}
+
+.control label {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+}
+
+.control label .readout {
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.control input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.buttons {
+  display: flex;
+  gap: 0.6rem;
+}
+
+button {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 0.5em 0.9em;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button.upload-btn {
+  position: static;
+}
+
+input[type='file'] {
+  display: none;
+}
+
+figcaption {
+  max-width: 680px;
+  margin: 0.9rem auto 0;
+  padding: 0 1rem 0.9rem;
+  border-bottom: 1px solid var(--rule);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  gap: 0.6em;
+}
+
+figcaption .fig-label {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--ink);
+  flex-shrink: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
