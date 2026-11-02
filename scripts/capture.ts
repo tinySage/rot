@@ -186,23 +186,25 @@ async function main(): Promise<void> {
 
     console.log('Encoding docs/demo.gif (10s, 720px, two-pass palette)...');
     const palettePath = path.join(videoDir, 'palette.png');
+    // The trim happens inside the filtergraph (not via global -ss/-t) for
+    // both passes: palettegen only emits its one output frame at
+    // end-of-stream, and that handoff turned out to be unreliable when
+    // combined with -ss/-t trimming the input instead.
+    const trimFilter = `trim=start=${skip}:duration=10,setpts=PTS-STARTPTS`;
     ffmpeg([
       '-y',
       '-i', rawVideoPath,
-      '-ss', skip,
-      '-t', '10',
-      '-vf', `${cropFilter},scale=720:-2:flags=lanczos,fps=15,palettegen`,
+      '-vf', `${trimFilter},${cropFilter},scale=720:-2:flags=lanczos,fps=15,palettegen`,
       '-update', '1',
+      '-frames:v', '1',
       palettePath,
     ]);
     ffmpeg([
       '-y',
       '-i', rawVideoPath,
       '-i', palettePath,
-      '-ss', skip,
-      '-t', '10',
       '-filter_complex',
-      `[0:v]${cropFilter},scale=720:-2:flags=lanczos,fps=15[x];[x][1:v]paletteuse`,
+      `[0:v]${trimFilter},${cropFilter},scale=720:-2:flags=lanczos,fps=15[x];[x][1:v]paletteuse`,
       path.join(DOCS_DIR, 'demo.gif'),
     ]);
 
