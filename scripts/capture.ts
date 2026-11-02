@@ -192,6 +192,7 @@ async function main(): Promise<void> {
       '-ss', skip,
       '-t', '10',
       '-vf', `${cropFilter},scale=720:-2:flags=lanczos,fps=15,palettegen`,
+      '-update', '1',
       palettePath,
     ]);
     ffmpeg([
