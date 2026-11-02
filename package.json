@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "capture": "tsx scripts/capture.ts"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",
@@ -18,6 +19,8 @@
   "devDependencies": {
     "@types/katex": "^0.16.8",
     "@webgpu/types": "^0.1.74",
+    "playwright": "^1.64.1",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"
   }

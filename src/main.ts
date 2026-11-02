@@ -16,6 +16,10 @@ import { WebGPUSim } from './gpu/WebGPUSim';
 import { requestWebGPUDevice } from './gpu/detectWebGPU';
 import { runBenchmark, type BenchmarkResult } from './gpu/Benchmark';
 
+const DEMO_MODE = new URLSearchParams(window.location.search).has('demo');
+const DEMO_IMAGE_URL = '/demo.jpg';
+const DEMO_SPEED_MULTIPLIER = 2;
+
 const SIM_WIDTH = 480;
 const SIM_HEIGHT = 216;
 const MAX_CANVAS_WIDTH = 1800;
@@ -477,6 +481,29 @@ sim.setBaseImage(specimenCanvas);
 
 let stepsPerFrame = 12;
 let paused = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// --- Demo mode (/?demo): for scripts/capture.ts, not for visitors in general -
+
+if (DEMO_MODE) {
+  canvasWrap.classList.add('demo-mode');
+  paused = false;
+  stepsPerFrame *= DEMO_SPEED_MULTIPLIER;
+
+  const demoImg = new Image();
+  demoImg.onload = () => {
+    sim.setBaseImage(demoImg);
+    fig4.setBaseImage(demoImg);
+    sim6Iso?.setBaseImage(demoImg);
+    sim6Aniso?.setBaseImage(demoImg);
+    resetAllSims();
+    canvasWrap.classList.add('has-image');
+    void updateGuidance(demoImg, demoImg.naturalWidth, demoImg.naturalHeight);
+  };
+  demoImg.onerror = () => {
+    // No public/demo.jpg — the procedural specimen already loaded above stays.
+  };
+  demoImg.src = DEMO_IMAGE_URL;
+}
 
 const fRange = document.querySelector<HTMLInputElement>('#fRange')!;
 const kRange = document.querySelector<HTMLInputElement>('#kRange')!;

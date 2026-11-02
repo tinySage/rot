@@ -130,6 +130,11 @@ figure.fig.page {
   opacity: 1;
 }
 
+/* scripts/capture.ts's /?demo capture: no upload prompt in the recording. */
+.fig-canvas-wrap.demo-mode .drop-hint {
+  display: none;
+}
+
 .fig-canvas-wrap.drag-over .drop-hint {
   background: rgba(0, 0, 0, 0.35);
 }
