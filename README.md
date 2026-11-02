@@ -1,4 +1,14 @@
+![Rot demo](docs/demo.gif)
+
 # Rot
+
+**Live demo:** [LIVE_URL_HERE/?demo](LIVE_URL_HERE/?demo)
+
+Figure 1, decaying over a minute of simulated time:
+
+| t = 0s | t = 20s | t = 60s |
+| :---: | :---: | :---: |
+| ![Figure 1 at t=0s](docs/fig1-00s.png) | ![Figure 1 at t=20s](docs/fig1-20s.png) | ![Figure 1 at t=60s](docs/fig1-60s.png) |
 
 **Rot: content-aware reaction–diffusion on photographs.** A living research
 paper (in the Distill.pub tradition) where every figure is a GPU simulation,
@@ -8,6 +18,8 @@ the image as a spreading, lit discoloration that is guided by the
 photograph's own edges and faces.
 
 Byline: Muktanan Mohapatra.
+
+![Rot full-page screenshot](docs/screenshot.png)
 
 ## Concept
 
@@ -150,12 +162,10 @@ npm run preview   # serve the built dist/ locally to sanity-check it
 The build is a static site (`dist/`) — `vercel.json` is set up for a
 zero-config static deploy on Vercel, but any static host works.
 
-## Screenshot
+## Capturing the README media
 
-<!-- TODO: add a screenshot, e.g. docs/screenshot.png -->
-![Screenshot placeholder](docs/screenshot.png)
-
-## Live
-
-<!-- TODO: add the deployed URL once available -->
-**Live demo:** _coming soon_
+`npm run capture` (`scripts/capture.ts`) builds the site, serves `dist/`,
+and drives headless Chromium through `/?demo` to regenerate everything
+under `docs/`: the screenshot, the three Figure 1 decay-sequence frames,
+and the mp4/gif above. Requires Playwright's Chromium and `ffmpeg` on
+`PATH`.
