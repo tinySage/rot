@@ -18,6 +18,10 @@ const BASE_URL = `http://localhost:${PORT}`;
 const VIEWPORT = { width: 1440, height: 900 };
 
 const CHROMIUM_ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+// Video recording starts at navigation, before the page (fonts, six WebGL2
+// contexts, demo-mode setup) has actually settled; both the pre-screenshot
+// wait and the mp4/gif's ffmpeg -ss trim skip this same window.
+const SETTLE_SECONDS = 4;
 
 function run(cmd: string, args: string[], cwd: string): void {
   console.log(`$ ${cmd} ${args.join(' ')}`);
@@ -102,7 +106,7 @@ async function main(): Promise<void> {
     const canvasWrap = page.locator('#canvasWrap');
     await canvasWrap.waitFor({ state: 'visible' });
     // Let WebGL context setup and the first few frames settle.
-    await wait(2000);
+    await wait(SETTLE_SECONDS * 1000);
 
     const checkForPageErrors = () => {
       if (pageErrors.length > 0) {
@@ -132,7 +136,7 @@ async function main(): Promise<void> {
     console.log('t=0s: capturing fig1-00s.png');
     await page.screenshot({ path: path.join(DOCS_DIR, 'fig1-00s.png'), clip: fig1Clip, timeout: screenshotTimeout });
 
-    await wait(18000);
+    await wait(16000);
     checkForPageErrors();
     console.log('t=20s: capturing fig1-20s.png');
     await page.screenshot({ path: path.join(DOCS_DIR, 'fig1-20s.png'), clip: fig1Clip, timeout: screenshotTimeout });
@@ -140,7 +144,10 @@ async function main(): Promise<void> {
     await wait(20000);
     checkForPageErrors();
     console.log('t=40s: capturing screenshot.png (full page)');
-    await page.screenshot({ path: path.join(DOCS_DIR, 'screenshot.png'), fullPage: true, timeout: screenshotTimeout });
+    // Full-page screenshots scroll-and-stitch, which is much slower than a
+    // clipped rect under this much concurrent WebGL2 rendering — give it
+    // more room than the Figure 1 crops.
+    await page.screenshot({ path: path.join(DOCS_DIR, 'screenshot.png'), fullPage: true, timeout: 120000 });
 
     await wait(20000);
     checkForPageErrors();
@@ -156,11 +163,17 @@ async function main(): Promise<void> {
     console.log('Raw recording:', rawVideoPath);
 
     const cropFilter = `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}`;
+    // Recording starts at navigation, before the page (fonts, six WebGL2
+    // contexts, demo-mode setup) has settled — skip past that pre-render
+    // window (black canvas, drop-hint still showing) rather than exporting
+    // it as the first couple of seconds of the clip.
+    const skip = String(SETTLE_SECONDS);
 
     console.log('Encoding docs/demo.mp4 (H.264, 20s, 960px wide)...');
     ffmpeg([
       '-y',
       '-i', rawVideoPath,
+      '-ss', skip,
       '-t', '20',
       '-vf', `${cropFilter},scale=960:-2`,
       '-c:v', 'libx264',
@@ -176,6 +189,7 @@ async function main(): Promise<void> {
     ffmpeg([
       '-y',
       '-i', rawVideoPath,
+      '-ss', skip,
       '-t', '10',
       '-vf', `${cropFilter},scale=720:-2:flags=lanczos,fps=15,palettegen`,
       palettePath,
@@ -184,6 +198,7 @@ async function main(): Promise<void> {
       '-y',
       '-i', rawVideoPath,
       '-i', palettePath,
+      '-ss', skip,
       '-t', '10',
       '-filter_complex',
       `[0:v]${cropFilter},scale=720:-2:flags=lanczos,fps=15[x];[x][1:v]paletteuse`,
